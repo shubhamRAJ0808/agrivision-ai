@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in — AgriVision AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="auth-shell">
+  <div class="auth-card">
+    <div class="brand" style="margin-bottom:22px;"><span class="brand-mark">AV</span> AgriVision AI</div>
+    <h1>Welcome back</h1>
+    <p class="auth-sub">Log in to your farm dashboard.</p>
+    <div class="auth-error" id="errBox"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="email" required autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary auth-submit" id="submitBtn">Log in</button>
+    </form>
+    <div class="auth-switch">Don't have an account? <a href="signup.html">Sign up</a></div>
+  </div>
+</div>
+<script src="assets/api.js"></script>
+<script>
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errBox = document.getElementById("errBox");
+  const btn = document.getElementById("submitBtn");
+  errBox.style.display = "none";
+  btn.textContent = "Logging in…";
+  btn.disabled = true;
+  try {
+    const data = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: document.getElementById("email").value,
+        password: document.getElementById("password").value,
+      }),
+    });
+    setSession(data.access_token, data.user);
+    window.location.href = "app.html";
+  } catch (err) {
+    errBox.textContent = err.message;
+    errBox.style.display = "block";
+  } finally {
+    btn.textContent = "Log in";
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

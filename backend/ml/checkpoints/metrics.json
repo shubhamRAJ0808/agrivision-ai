@@ -1,0 +1,194 @@
+{
+  "classes": [
+    "Tomato___Early_blight",
+    "Tomato___Late_blight",
+    "Tomato___Leaf_Mold",
+    "Tomato___healthy",
+    "Other___not_tomato_leaf"
+  ],
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 1.4371,
+      "train_acc": 0.4239,
+      "val_original_bg": 0.6875,
+      "val_shifted_bg": 0.4266
+    },
+    {
+      "epoch": 2,
+      "train_loss": 1.1748,
+      "train_acc": 0.5847,
+      "val_original_bg": 0.5788,
+      "val_shifted_bg": 0.3967
+    },
+    {
+      "epoch": 3,
+      "train_loss": 1.13,
+      "train_acc": 0.5968,
+      "val_original_bg": 0.6984,
+      "val_shifted_bg": 0.4728
+    },
+    {
+      "epoch": 4,
+      "train_loss": 1.141,
+      "train_acc": 0.5963,
+      "val_original_bg": 0.5978,
+      "val_shifted_bg": 0.4701
+    },
+    {
+      "epoch": 5,
+      "train_loss": 1.1597,
+      "train_acc": 0.5998,
+      "val_original_bg": 0.7745,
+      "val_shifted_bg": 0.5408
+    },
+    {
+      "epoch": 6,
+      "train_loss": 1.1598,
+      "train_acc": 0.5817,
+      "val_original_bg": 0.6984,
+      "val_shifted_bg": 0.5082
+    },
+    {
+      "epoch": 7,
+      "train_loss": 1.1454,
+      "train_acc": 0.6008,
+      "val_original_bg": 0.7745,
+      "val_shifted_bg": 0.5842
+    },
+    {
+      "epoch": 8,
+      "train_loss": 1.15,
+      "train_acc": 0.5882,
+      "val_original_bg": 0.7337,
+      "val_shifted_bg": 0.5489
+    },
+    {
+      "epoch": 9,
+      "train_loss": 1.1828,
+      "train_acc": 0.5655,
+      "val_original_bg": 0.7527,
+      "val_shifted_bg": 0.5761
+    },
+    {
+      "epoch": 10,
+      "train_loss": 1.1048,
+      "train_acc": 0.6215,
+      "val_original_bg": 0.8071,
+      "val_shifted_bg": 0.6793
+    },
+    {
+      "epoch": 11,
+      "train_loss": 1.0967,
+      "train_acc": 0.6326,
+      "val_original_bg": 0.7554,
+      "val_shifted_bg": 0.6196
+    },
+    {
+      "epoch": 12,
+      "train_loss": 1.0546,
+      "train_acc": 0.6522,
+      "val_original_bg": 0.7826,
+      "val_shifted_bg": 0.6087
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.9927,
+      "train_acc": 0.6875,
+      "val_original_bg": 0.8071,
+      "val_shifted_bg": 0.6875
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.9743,
+      "train_acc": 0.7112,
+      "val_original_bg": 0.8424,
+      "val_shifted_bg": 0.7201
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.9773,
+      "train_acc": 0.6976,
+      "val_original_bg": 0.8614,
+      "val_shifted_bg": 0.7255
+    },
+    {
+      "epoch": 16,
+      "train_loss": 0.9286,
+      "train_acc": 0.7273,
+      "val_original_bg": 0.8533,
+      "val_shifted_bg": 0.7065
+    },
+    {
+      "epoch": 17,
+      "train_loss": 0.947,
+      "train_acc": 0.7142,
+      "val_original_bg": 0.8533,
+      "val_shifted_bg": 0.7147
+    },
+    {
+      "epoch": 18,
+      "train_loss": 0.9215,
+      "train_acc": 0.7298,
+      "val_original_bg": 0.8614,
+      "val_shifted_bg": 0.7174
+    }
+  ],
+  "val_accuracy_original_background": 0.8614,
+  "val_accuracy_shifted_background": 0.7147,
+  "per_class_accuracy_original": {
+    "Tomato___Early_blight": 0.642,
+    "Tomato___Late_blight": 0.687,
+    "Tomato___Leaf_Mold": 0.925,
+    "Tomato___healthy": 1.0,
+    "Other___not_tomato_leaf": 0.99
+  },
+  "confusion_matrix_original(rows=true, cols=predicted)": [
+    [
+      43,
+      8,
+      5,
+      11,
+      0
+    ],
+    [
+      6,
+      46,
+      4,
+      8,
+      3
+    ],
+    [
+      1,
+      2,
+      62,
+      2,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      67,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1,
+      99
+    ]
+  ],
+  "unseen_plants_rejected_as_not_tomato": 0.9875,
+  "unseen_plants_not_called_late_blight": 1.0,
+  "blank_or_noise_images_rejected": 1.0,
+  "unseen_plant_species": [
+    "Lemon",
+    "Jamun"
+  ],
+  "train_images": 1992,
+  "val_images": 368,
+  "training_seconds": 1059.2,
+  "note": "Validation uses held-out PlantVillage photos (lab images). 'shifted' puts those same leaves on new backgrounds/lighting as a PROXY for field photos. No real field photos were available, so real-world accuracy is unknown and is likely lower than these numbers."
+}

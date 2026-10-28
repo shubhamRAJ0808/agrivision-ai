@@ -1,0 +1,38 @@
+{
+  "classes": [
+    "Alstonia Scholaris",
+    "Arjun",
+    "Bael",
+    "Basil",
+    "Chinar",
+    "Gauva",
+    "Jamun",
+    "Jatropha",
+    "Lemon",
+    "Mango",
+    "Pomegranate",
+    "Pongamia Pinnata"
+  ],
+  "image_size": 96,
+  "epochs": 10,
+  "new_leaf_accuracy": 0.4451,
+  "new_leaf_species_covered": [
+    "Alstonia Scholaris",
+    "Arjun",
+    "Chinar",
+    "Gauva",
+    "Jamun",
+    "Jatropha",
+    "Lemon",
+    "Mango",
+    "Pomegranate",
+    "Pongamia Pinnata"
+  ],
+  "new_leaf_train_images": 2026,
+  "new_leaf_test_images": 2004,
+  "valid_accuracy_same_leaves": 0.8909,
+  "test_accuracy_same_leaves": 0.8818,
+  "train_images": 4274,
+  "training_seconds": 512.5,
+  "note": "valid/test share the same physical leaves as train (1-2 leaves per species), so those accuracies are inflated. new_leaf_accuracy is the more honest estimate."
+}

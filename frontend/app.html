@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — AgriVision AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <div class="brand"><span class="brand-mark">AV</span> AgriVision AI</div>
+    <div class="nav-user">
+      <span id="userName"></span>
+      <button class="btn btn-ghost" onclick="logout()">Log out</button>
+    </div>
+  </div>
+</header>
+
+<div class="dash-wrap">
+  <div class="dash-header">
+    <div>
+      <h1>Farm Dashboard</h1>
+      <p style="color:rgba(16,26,19,0.6);margin-top:6px;">Green tags are real computation (trained models, live data or formulas on your input). Yellow <span class="badge sim" style="vertical-align:1px;">simulated</span> means illustrative data. Each result says how it was produced.</p>
+    </div>
+  </div>
+  <div class="module-grid" id="moduleGrid"></div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle"></h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="assets/api.js"></script>
+<script>
+requireAuth();
+const user = getUser();
+document.getElementById("userName").textContent = user ? `👋 ${user.name}` : "";
+
+const modules = [
+  {id:"disease", icon:"🌿", title:"Disease Diagnosis", real:true, tag:"trained CNN",
+   desc:"Photograph or upload a tomato leaf — a trained CNN classifies disease, confidence and severity."},
+  {id:"species", icon:"🌳", title:"Plant Species ID", real:true, tag:"trained CNN (demo)",
+   desc:"Upload or capture a leaf photo — a separate trained CNN names which of 12 species it is."},
+  {id:"pest", icon:"🐛", title:"Pest Detection", real:true,
+   desc:"Upload/capture a field photo — server-side texture analysis flags likely pest activity (a heuristic, not a trained model).", tag:"image analysis"},
+  {id:"yield", icon:"🌾", title:"Yield Prediction", real:true, tag:"formula",
+   desc:"Enter soil, weather and NDVI inputs for a transparent expected-yield estimate."},
+  {id:"irrigation", icon:"💧", title:"Irrigation Recommendation", real:true, tag:"formula",
+   desc:"Get a water-amount and timing recommendation from a real water-balance model."},
+  {id:"fertilizer", icon:"🧪", title:"Fertilizer Recommendation", real:true, tag:"formula",
+   desc:"Enter soil N/P/K test results for a deficit-based product and quantity recommendation."},
+  {id:"market", icon:"💰", title:"Market Price Forecast", real:true, tag:"live web data",
+   desc:"Today's crop price found by web search (with sources), plus a 7/15/30-day projection and hold/sell hint. Needs the Gemini key; otherwise shows a labeled simulation."},
+  {id:"satellite", icon:"🛰️", title:"Satellite Monitoring", real:false, tag:"simulated",
+   desc:"24-zone farm health grid. Simulated — a real satellite feed needs a provider account."},
+  {id:"assistant", icon:"💬", title:"Farm Assistant", real:true, tag:"Gemini AI",
+   desc:"Chat about any crop, soil, pest, water or fertilizer question. Answered by Google Gemini (needs your API key)."},
+  {id:"history", icon:"📜", title:"Scan History", real:true, tag:"your account",
+   desc:"Your past disease/pest scan results, stored in your account."},
+];
+
+const grid = document.getElementById("moduleGrid");
+modules.forEach(m => {
+  const card = document.createElement("div");
+  card.className = "mcard";
+  card.innerHTML = `
+    <div class="icon">${m.icon}</div>
+    <h3>${m.title}</h3>
+    <p>${m.desc}</p>
+    <span class="badge ${m.real ? 'real' : 'sim'}">${m.tag || (m.real ? 'real' : 'simulated')}</span>
+  `;
+  card.addEventListener("click", () => openModal(m.id, `${m.icon} ${m.title}`));
+  grid.appendChild(card);
+});
+
+const overlay = document.getElementById("modalOverlay");
+const modalTitle = document.getElementById("modalTitle");
+const modalBody = document.getElementById("modalBody");
+let activeStream = null;
+
+function stopCamera() {
+  if (activeStream) { activeStream.getTracks().forEach(t => t.stop()); activeStream = null; }
+}
+function openModal(id, title) {
+  modalTitle.textContent = title;
+  modalBody.innerHTML = "";
+  overlay.classList.add("open");
+  renderers[id](modalBody);
+}
+function closeModal() {
+  overlay.classList.remove("open");
+  stopCamera();
+}
+overlay.addEventListener("click", e => { if (e.target === overlay) closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+// ---------- Shared capture widget (upload OR live camera) for image modules ----------
+function renderCaptureWidget(container, { onImageReady }) {
+  container.innerHTML = `
+    <div class="capture-tabs">
+      <button class="capture-tab active" data-tab="upload">📁 Upload photo</button>
+      <button class="capture-tab" data-tab="camera">📷 Use camera</button>
+    </div>
+    <div id="captureArea"></div>
+  `;
+  const area = container.querySelector("#captureArea");
+  const tabs = container.querySelectorAll(".capture-tab");
+  let isSubmitting = false;
+
+  function showUpload() {
+    stopCamera();
+    area.innerHTML = `
+      <div class="upload-zone" id="uploadZone">
+        <div style="font-size:26px;">📷</div>
+        <div style="margin-top:8px;font-weight:600;">Click to choose a photo</div>
+        <div style="font-size:12px;color:rgba(16,26,19,0.5);margin-top:4px;">JPG or PNG</div>
+      </div>
+      <input type="file" accept="image/*" id="fileInput" style="display:none;">
+    `;
+    const zone = area.querySelector("#uploadZone");
+    const input = area.querySelector("#fileInput");
+    const openFilePicker = () => {
+      if (!isSubmitting) input.click();
+    };
+    zone.addEventListener("click", openFilePicker);
+    input.addEventListener("change", () => {
+      const file = input.files[0];
+      if (!file || isSubmitting) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        isSubmitting = true;
+        zone.classList.add("submitting");
+        zone.removeEventListener("click", openFilePicker);
+        zone.innerHTML = `<img src="${e.target.result}"><button type="button" class="btn btn-ghost" style="margin-top:8px;font-size:12px;" id="chooseAnotherBtn" disabled>Choose another</button>`;
+        const chooseAnotherBtn = zone.querySelector("#chooseAnotherBtn");
+        chooseAnotherBtn.addEventListener("click", () => {
+          if (!isSubmitting) {
+            input.value = "";
+            input.click();
+          }
+        });
+        Promise.resolve(onImageReady(file)).finally(() => {
+          isSubmitting = false;
+          zone.classList.remove("submitting");
+          chooseAnotherBtn.disabled = false;
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function showCamera() {
+    area.innerHTML = `
+      <video id="cam" autoplay playsinline muted></video>
+      <button class="btn btn-primary" style="width:100%;margin-top:10px;" id="snapBtn">Capture photo</button>
+      <div id="camErr" style="color:#b0431f;font-size:13px;margin-top:8px;"></div>
+    `;
+    const video = area.querySelector("#cam");
+    try {
+      activeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = activeStream;
+    } catch (err) {
+      area.querySelector("#camErr").textContent = "Could not access camera: " + err.message;
+      return;
+    }
+    area.querySelector("#snapBtn").addEventListener("click", () => {
+      if (isSubmitting) return;
+      isSubmitting = true;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      canvas.toBlob(blob => {
+        const file = new File([blob], "capture.jpg", { type: "image/jpeg" });
+        area.innerHTML = `<img src="${canvas.toDataURL()}" style="max-height:220px;border-radius:8px;"><button class="btn btn-ghost" style="margin-top:10px;" id="retakeBtn" disabled>Retake</button>`;
+        area.querySelector("#retakeBtn").addEventListener("click", showCamera);
+        Promise.resolve(onImageReady(file)).finally(() => {
+          isSubmitting = false;
+          area.querySelector("#retakeBtn").disabled = false;
+        });
+      }, "image/jpeg", 0.92);
+    });
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      tabs.forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      tab.dataset.tab === "upload" ? showUpload() : showCamera();
+    });
+  });
+  showUpload();
+}
+
+// ---------- Disease Diagnosis ----------
+function renderDisease(container) {
+  container.innerHTML = `<p style="color:rgba(16,26,19,0.6);margin:0 0 12px;">Upload or capture a close-up of ONE tomato leaf (fill the frame, good light, in focus). It recognises: Healthy, Early Blight, Late Blight, Leaf Mold — and says so when the photo is not a tomato leaf.</p>`;
+  const capDiv = document.createElement("div");
+  container.appendChild(capDiv);
+  const resultBox = document.createElement("div");
+  resultBox.className = "result-box";
+  container.appendChild(resultBox);
+
+  renderCaptureWidget(capDiv, {
+    onImageReady: async (file) => {
+      resultBox.classList.add("show");
+      resultBox.innerHTML = `<span class="spinner"></span> Running inference through the trained CNN…`;
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await apiFetch("/api/disease/diagnose", { method: "POST", body: form });
+        const secondOpinionHtml = r.second_opinion ? `
+          <div style="margin-top:14px;padding-top:10px;border-top:1px solid rgba(16,26,19,0.12);font-size:12px;">
+            <strong>Second opinion</strong>
+            <div style="margin-top:4px;color:rgba(16,26,19,0.7);">${escapeHtml(r.second_opinion.text)}</div>
+            <div class="method-note">${escapeHtml(r.second_opinion.source)}</div>
+          </div>
+        ` : "";
+        const warnHtml = r.warning
+          ? `<div style="margin-top:10px;padding:8px 10px;border-radius:8px;font-size:12px;background:rgba(223,174,61,0.22);">⚠️ ${escapeHtml(r.warning)}</div>` : "";
+        const top = (r.all_probabilities || []).slice(0, 3)
+          .map(p => `<div class="result-row" style="font-size:12px;"><span>${escapeHtml(p.label)}</span><span>${(p.probability * 100).toFixed(0)}%</span></div>`).join("");
+        resultBox.innerHTML = `
+          <div class="result-row"><span>Diagnosis</span><b>${escapeHtml(r.diagnosis)}</b></div>
+          <div class="result-row"><span>Confidence</span><b>${r.confidence}%</b></div>
+          <div class="result-row"><span>Severity</span><b>${escapeHtml(r.severity)}</b></div>
+          <div class="bar-track" style="margin:10px 0;"><div class="bar-fill" style="width:${r.confidence}%"></div></div>
+          ${warnHtml}
+          <p style="font-size:13px;margin:10px 0 6px;">${escapeHtml(r.advice)}</p>
+          <details style="font-size:12px;"><summary style="cursor:pointer;">All probabilities</summary>${top}</details>
+          <div class="method-note">${escapeHtml(r.model)}</div>
+          ${secondOpinionHtml}
+        `;
+      } catch (err) {
+        resultBox.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`;
+      }
+    }
+  });
+}
+
+// ---------- Pest Detection ----------
+function renderPest(container) {
+  container.innerHTML = `<p style="color:rgba(16,26,19,0.6);margin:0 0 12px;">Upload or capture a field photo.</p>`;
+  const capDiv = document.createElement("div");
+  container.appendChild(capDiv);
+  const resultBox = document.createElement("div");
+  resultBox.className = "result-box";
+  container.appendChild(resultBox);
+
+  renderCaptureWidget(capDiv, {
+    onImageReady: async (file) => {
+      resultBox.classList.add("show");
+      resultBox.innerHTML = `<span class="spinner"></span> Analyzing image texture…`;
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await apiFetch("/api/pest/detect", { method: "POST", body: form });
+        resultBox.innerHTML = `
+          <div class="result-row"><span>Detection</span><b>${r.detection}</b></div>
+          <div class="result-row"><span>Severity</span><b>${r.severity}</b></div>
+          <div class="result-row"><span>Coverage estimate</span><b>${r.infestation_estimate_pct}%</b></div>
+          <div class="method-note">${r.method}</div>
+        `;
+      } catch (err) {
+        resultBox.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`;
+      }
+    }
+  });
+}
+
+// ---------- Yield ----------
+function renderYield(container) {
+  container.innerHTML = `
+    <div class="form-row"><label>Crop</label>
+      <select id="crop"><option>wheat</option><option>rice</option><option>tomato</option><option>maize</option></select></div>
+    <div class="form-row"><label>Soil moisture (%)</label><input type="number" id="moisture" value="45"></div>
+    <div class="form-row"><label>Avg temperature (°C)</label><input type="number" id="temp" value="26"></div>
+    <div class="form-row"><label>Rainfall this week (mm)</label><input type="number" id="rain" value="18"></div>
+    <div class="form-row"><label>NDVI (0-1)</label><input type="number" step="0.05" id="ndvi" value="0.62"></div>
+    <button class="btn btn-primary" id="calcBtn" style="width:100%;">Predict yield</button>
+    <div class="result-box" id="res"></div>
+  `;
+  container.querySelector("#calcBtn").addEventListener("click", async () => {
+    const res = container.querySelector("#res");
+    res.classList.add("show");
+    res.innerHTML = `<span class="spinner"></span> Calculating…`;
+    try {
+      const r = await apiFetch("/api/yield/predict", { method: "POST", body: JSON.stringify({
+        crop: container.querySelector("#crop").value,
+        soil_moisture_pct: +container.querySelector("#moisture").value,
+        avg_temp_c: +container.querySelector("#temp").value,
+        rainfall_mm_week: +container.querySelector("#rain").value,
+        ndvi: +container.querySelector("#ndvi").value,
+        fertilizer_applied: true,
+      })});
+      res.innerHTML = `
+        <div class="result-row"><span>Expected yield</span><b>${r.expected_yield_t_per_ha} t/ha</b></div>
+        <div class="result-row"><span>Confidence</span><b>${r.confidence_pct}%</b></div>
+        <div class="method-note">${r.method}</div>
+      `;
+    } catch (err) { res.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`; }
+  });
+}
+
+// ---------- Irrigation ----------
+function renderIrrigation(container) {
+  container.innerHTML = `
+    <div class="form-row"><label>Soil moisture (%)</label><input type="number" id="moisture" value="32"></div>
+    <div class="form-row"><label>Crop stage</label>
+      <select id="stage"><option value="seedling">Seedling</option><option value="vegetative" selected>Vegetative</option><option value="flowering">Flowering</option><option value="maturity">Maturity</option></select></div>
+    <div class="form-row"><label>Forecast rain next 3 days (mm)</label><input type="number" id="rain" value="5"></div>
+    <div class="form-row"><label>Avg temperature (°C)</label><input type="number" id="temp" value="29"></div>
+    <div class="form-row"><label>Soil type</label>
+      <select id="soil"><option value="sandy">Sandy</option><option value="loam" selected>Loam</option><option value="clay">Clay</option></select></div>
+    <button class="btn btn-primary" id="calcBtn" style="width:100%;">Get recommendation</button>
+    <div class="result-box" id="res"></div>
+  `;
+  container.querySelector("#calcBtn").addEventListener("click", async () => {
+    const res = container.querySelector("#res");
+    res.classList.add("show");
+    res.innerHTML = `<span class="spinner"></span> Calculating…`;
+    try {
+      const r = await apiFetch("/api/irrigation/recommend", { method: "POST", body: JSON.stringify({
+        soil_moisture_pct: +container.querySelector("#moisture").value,
+        crop_stage: container.querySelector("#stage").value,
+        forecast_rain_mm_next_3d: +container.querySelector("#rain").value,
+        avg_temp_c: +container.querySelector("#temp").value,
+        soil_type: container.querySelector("#soil").value,
+      })});
+      res.innerHTML = `
+        <div class="result-row"><span>Recommended water</span><b>${r.recommended_water_mm} mm</b></div>
+        <div class="result-row"><span>Next irrigation</span><b>in ${r.next_irrigation_in_days} days</b></div>
+        <div class="result-row"><span>Water stress</span><b>${r.water_stress}</b></div>
+        <div class="method-note">${r.method}</div>
+      `;
+    } catch (err) { res.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`; }
+  });
+}
+
+// ---------- Fertilizer ----------
+function renderFertilizer(container) {
+  container.innerHTML = `
+    <div class="form-row"><label>Crop</label><input type="text" id="crop" value="wheat"></div>
+    <div class="form-row"><label>Crop stage</label>
+      <select id="stage"><option value="seedling">Seedling</option><option value="vegetative" selected>Vegetative</option><option value="flowering">Flowering</option><option value="maturity">Maturity</option></select></div>
+    <div class="form-row"><label>Soil Nitrogen (ppm)</label><input type="number" id="n" value="18"></div>
+    <div class="form-row"><label>Soil Phosphorus (ppm)</label><input type="number" id="p" value="12"></div>
+    <div class="form-row"><label>Soil Potassium (ppm)</label><input type="number" id="k" value="100"></div>
+    <button class="btn btn-primary" id="calcBtn" style="width:100%;">Get recommendation</button>
+    <div class="result-box" id="res"></div>
+  `;
+  container.querySelector("#calcBtn").addEventListener("click", async () => {
+    const res = container.querySelector("#res");
+    res.classList.add("show");
+    res.innerHTML = `<span class="spinner"></span> Calculating…`;
+    try {
+      const r = await apiFetch("/api/fertilizer/recommend", { method: "POST", body: JSON.stringify({
+        crop: container.querySelector("#crop").value,
+        crop_stage: container.querySelector("#stage").value,
+        soil_n_ppm: +container.querySelector("#n").value,
+        soil_p_ppm: +container.querySelector("#p").value,
+        soil_k_ppm: +container.querySelector("#k").value,
+      })});
+      const list = r.recommendations.length
+        ? r.recommendations.map(x => `<div class="result-row"><span>${x.product} (${x.nutrient})</span><b>${x.amount_kg_per_ha} kg/ha</b></div>`).join("")
+        : `<div class="result-row"><span colspan="2">No deficiency detected</span></div>`;
+      res.innerHTML = `${list}<div class="result-row"><span>Urgency</span><b>${r.urgency}</b></div><div class="method-note">${r.method}</div>`;
+    } catch (err) { res.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`; }
+  });
+}
+
+// ---------- Shared helpers ----------
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function safeUrl(u) { return /^https?:\/\//i.test(u) ? u : "#"; }
+
+// ---------- Market ----------
+function renderMarket(container) {
+  container.innerHTML = `
+    <div class="form-row"><label>Crop</label>
+      <select id="crop">
+        <option>wheat</option><option>rice</option><option>tomato</option><option>potato</option>
+        <option>onion</option><option>maize</option><option>soybean</option><option>cotton</option>
+        <option>sugarcane</option><option>mustard</option>
+      </select></div>
+    <div class="form-row"><label>Region / market</label><input type="text" id="region" value="India" placeholder="e.g. Punjab, India"></div>
+    <button class="btn btn-primary" id="calcBtn" style="width:100%;">Get live price &amp; forecast</button>
+    <div class="result-box" id="res"></div>
+  `;
+  const btn = container.querySelector("#calcBtn");
+  btn.addEventListener("click", async () => {
+    const res = container.querySelector("#res");
+    res.classList.add("show");
+    res.innerHTML = `<span class="spinner"></span> Searching the web for today's price… (can take up to 30 seconds)`;
+    btn.disabled = true;
+    try {
+      const crop = encodeURIComponent(container.querySelector("#crop").value);
+      const region = encodeURIComponent(container.querySelector("#region").value.trim() || "India");
+      const r = await apiFetch(`/api/market/forecast?crop=${crop}&region=${region}`, { method: "GET" });
+      const unit = escapeHtml(r.price_unit || "");
+      const rows = r.forecasts.map(f => `<div class="result-row"><span>${f.horizon_days}-day projection</span><b>${f.price} ${unit} (${f.pct_change > 0 ? "+" : ""}${f.pct_change}%)</b></div>`).join("");
+      const badge = r.data_mode === "live"
+        ? `<span class="badge real">live web data</span>`
+        : `<span class="badge sim">simulated</span>`;
+      const notice = r.notice ? `<div class="method-note" style="color:#8a6a1a;">${escapeHtml(r.notice)}</div>` : "";
+      const sources = (r.sources || []).length
+        ? `<div class="method-note">Sources: ${r.sources.map(s => `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;">${escapeHtml(s.title)}</a>`).join(" · ")}</div>`
+        : "";
+      res.innerHTML = `
+        <div class="result-row"><span>Current price ${badge}</span><b>${r.current_price} ${unit}</b></div>
+        ${r.price_note ? `<div class="method-note" style="margin:2px 0 6px;">${escapeHtml(r.price_note)}</div>` : ""}
+        ${rows}
+        <div class="result-row"><span>Recommendation</span><b>${escapeHtml(r.recommendation)}</b></div>
+        ${notice}${sources}
+        <div class="method-note">${escapeHtml(r.method)}</div>`;
+    } catch (err) {
+      res.innerHTML = `<span style="color:#b0431f;">${escapeHtml(err.message)}</span>`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// ---------- Satellite ----------
+async function renderSatellite(container) {
+  container.innerHTML = `<span class="spinner"></span> Loading farm scan…`;
+  try {
+    const r = await apiFetch("/api/satellite/scan", { method: "GET" });
+    const colors = { healthy: "#79c26a", stressed: "#dfae3d", flooded: "#3d7f96" };
+    if (!Array.isArray(r.zones) || !r.summary) throw new Error("Satellite response has an unexpected shape.");
+    const cells = r.zones.map(z => `<div style="aspect-ratio:1;border-radius:4px;background:${colors[z.state] || "#9aa39a"}"></div>`).join("");
+    container.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:14px;">${cells}</div>
+      <div class="result-box show">
+        <div class="result-row"><span>Healthy</span><b>${r.summary.healthy_pct}%</b></div>
+        <div class="result-row"><span>Stressed</span><b>${r.summary.stressed_pct}%</b></div>
+        <div class="result-row"><span>Flooded</span><b>${r.summary.flooded_pct}%</b></div>
+        <div class="method-note">${r.method}</div>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`; }
+}
+
+// ---------- Assistant ----------
+let assistantHistory = [];   // [{role:"user"|"assistant", text}] kept while the page is open
+
+function formatReply(text) {
+  let h = escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  const out = [];
+  let inList = false;
+  for (const line of h.split("\n")) {
+    const m = line.match(/^\s*[\*\-•]\s+(.*)$/);
+    if (m) {
+      if (!inList) { out.push('<ul style="margin:6px 0 6px 18px;padding:0;">'); inList = true; }
+      out.push(`<li>${m[1]}</li>`);
+    } else {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(line.trim() === "" ? '<div style="height:6px"></div>' : `<div>${line}</div>`);
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("");
+}
+
+function renderAssistant(container) {
+  container.innerHTML = `
+    <div id="aiStatus" style="font-size:12px;margin-bottom:8px;color:rgba(16,26,19,0.6);"><span class="spinner"></span> Checking AI connection…</div>
+    <div class="chat-log" id="log" style="height:320px;"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Ask anything about your crops, soil, pests, water…" maxlength="2000">
+      <button class="btn btn-primary" id="sendBtn">Send</button>
+    </div>
+    <div style="text-align:right;margin-top:6px;"><button class="btn btn-ghost" id="clearBtn" style="font-size:12px;padding:5px 12px;">New chat</button></div>
+  `;
+  const log = container.querySelector("#log");
+  const input = container.querySelector("#chatInput");
+  const sendBtn = container.querySelector("#sendBtn");
+
+  const addBot = (html, extraStyle = "") => {
+    log.insertAdjacentHTML("beforeend", `<div class="chat-msg bot" style="${extraStyle}">${html}</div>`);
+    log.scrollTop = log.scrollHeight;
+  };
+  const addUser = text => {
+    log.insertAdjacentHTML("beforeend", `<div class="chat-msg user">${escapeHtml(text)}</div>`);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  apiFetch("/api/assistant/status").then(st => {
+    const el = container.querySelector("#aiStatus"); if (!el) return;
+    el.innerHTML = st.ok
+      ? `<span style="color:#2f7a2f;">● AI connected</span> <span style="opacity:.7">(Gemini ${escapeHtml(st.model)})</span>`
+      : `<span style="color:#b0431f;">● AI not connected:</span> ${escapeHtml(st.message)}`;
+  }).catch(err => {
+    const el = container.querySelector("#aiStatus"); if (el) el.innerHTML = `<span style="color:#b0431f;">● ${escapeHtml(err.message)}</span>`;
+  });
+
+  addBot("Hi! I'm your farm assistant. Ask me anything about crops, soil, irrigation, fertilizer, pests, diseases or harvest timing — describe what you see and I'll help.");
+  assistantHistory.forEach(t => (t.role === "user" ? addUser(t.text) : addBot(formatReply(t.text))));
+
+  async function send() {
+    const text = input.value.trim();
+    if (!text || sendBtn.disabled) return;
+    addUser(text);
+    input.value = "";
+    sendBtn.disabled = true;
+    input.disabled = true;
+    log.insertAdjacentHTML("beforeend", `<div class="chat-msg bot" id="typing"><span class="spinner"></span> Thinking…</div>`);
+    log.scrollTop = log.scrollHeight;
+    try {
+      const r = await apiFetch("/api/assistant/chat", {
+        method: "POST",
+        body: JSON.stringify({ message: text, history: assistantHistory.slice(-12) }),
+      });
+      log.querySelector("#typing")?.remove();
+      assistantHistory.push({ role: "user", text }, { role: "assistant", text: r.reply });
+      if (r.source !== "gemini") {
+        addBot(`<div style="background:rgba(223,174,61,0.25);padding:6px 8px;border-radius:6px;font-size:12px;margin-bottom:8px;">⚠️ <b>Not an AI answer.</b> ${escapeHtml(r.notice || "AI assistant unavailable.")}</div>${formatReply(r.reply)}`);
+      } else {
+        addBot(formatReply(r.reply));
+      }
+    } catch (err) {
+      log.querySelector("#typing")?.remove();
+      addBot(`⚠️ ${escapeHtml(err.message)}`, "background:rgba(224,122,85,0.12);");
+    } finally {
+      sendBtn.disabled = false;
+      input.disabled = false;
+      input.focus();
+    }
+  }
+  sendBtn.addEventListener("click", send);
+  input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+  container.querySelector("#clearBtn").addEventListener("click", () => { assistantHistory = []; renderAssistant(container); });
+  input.focus();
+}
+
+// ---------- Plant Species ID ----------
+function renderSpecies(container) {
+  container.innerHTML = `<p style="color:rgba(16,26,19,0.6);margin:0 0 12px;">Upload or capture a single leaf on a plain background. This model knows 12 species: Alstonia, Arjuna, Bael, Basil, Chinar, Guava, Jamun, Jatropha, Lemon, Mango, Pomegranate, Pongamia.</p>`;
+  const capDiv = document.createElement("div");
+  container.appendChild(capDiv);
+  const resultBox = document.createElement("div");
+  resultBox.className = "result-box";
+  container.appendChild(resultBox);
+
+  renderCaptureWidget(capDiv, {
+    onImageReady: async (file) => {
+      resultBox.classList.add("show");
+      resultBox.innerHTML = `<span class="spinner"></span> Identifying the species…`;
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await apiFetch("/api/species/identify", { method: "POST", body: form });
+        const rows = r.top3.map(t => `
+          <div class="result-row"><span>${escapeHtml(t.species)} <i style="color:rgba(16,26,19,0.5);">${escapeHtml(t.scientific_name)}</i></span><b>${t.probability}%</b></div>`).join("");
+        const warn = r.warning ? `<div class="method-note" style="color:#8a6a1a;">⚠️ ${escapeHtml(r.warning)}</div>` : "";
+        resultBox.innerHTML = `
+          <div class="result-row"><span>Best match</span><b>${escapeHtml(r.species)}</b></div>
+          <div class="bar-track" style="margin:10px 0;"><div class="bar-fill" style="width:${r.confidence}%"></div></div>
+          ${rows}${warn}
+          <div class="method-note">${escapeHtml(r.model)}${r.accuracy_note ? " · " + escapeHtml(r.accuracy_note) : ""}</div>`;
+      } catch (err) {
+        resultBox.innerHTML = `<span style="color:#b0431f;">${escapeHtml(err.message)}</span>`;
+      }
+    }
+  });
+}
+
+// ---------- History ----------
+async function renderHistory(container) {
+  container.innerHTML = `<span class="spinner"></span> Loading…`;
+  try {
+    const rows = await apiFetch("/api/history/", { method: "GET" });
+    if (!rows.length) { container.innerHTML = `<p>No scans yet — try Disease Diagnosis or Pest Detection.</p>`; return; }
+    container.innerHTML = rows.map(r => `
+      <div class="result-row"><span>${new Date(r.created_at).toLocaleString()} · ${r.module}</span><b>${r.result_label} (${r.severity})</b></div>
+    `).join("");
+  } catch (err) { container.innerHTML = `<span style="color:#b0431f;">${err.message}</span>`; }
+}
+
+const renderers = {
+  disease: renderDisease, species: renderSpecies, pest: renderPest, yield: renderYield, irrigation: renderIrrigation,
+  fertilizer: renderFertilizer, market: renderMarket, satellite: renderSatellite,
+  assistant: renderAssistant, history: renderHistory,
+};
+</script>
+</body>
+</html>
